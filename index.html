@@ -364,7 +364,12 @@ function setBias(b) {
 
 // ── Add Alert ──────────────────────────────────────────────────────────────────
 function addAlert() {
-  const pair   = document.getElementById('f-pair').value.trim().toUpperCase();
+  let pair = document.getElementById('f-pair').value.trim().toUpperCase().replace(/\s/g,'');
+  // Auto-insert slash if missing: EURUSD -> EUR/USD, XAUUSD -> XAU/USD
+  if (pair && !pair.includes('/')) {
+    if (pair.length === 6) pair = pair.slice(0,3) + '/' + pair.slice(3);
+    else if (pair.length === 7) pair = pair.slice(0,4) + '/' + pair.slice(4); // e.g. XAU/USD
+  }
   const type   = document.getElementById('f-type').value;
   const note   = document.getElementById('f-note').value.trim();
   const repeat = document.getElementById('f-repeat').value;
