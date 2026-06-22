@@ -442,7 +442,7 @@ function getPairs() { return [...new Set(alerts.map(a => a.pair))]; }
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollOnce();
-  pollTimer = setInterval(pollOnce, 300000); // every 5 minutes
+  pollTimer = setInterval(pollOnce, 900000); // every 15 minutes
 }
 
 async function pollOnce() {
@@ -452,8 +452,10 @@ async function pollOnce() {
 
   setStatus('connecting','● Fetching…');
 
+  // Join pairs — do NOT encodeURIComponent the whole string, commas must stay unencoded
+  // TwelveData batch needs: symbol=EUR/USD,GBP/AUD (commas unencoded)
   const symbols = pairs.join(',');
-  const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbols)}&apikey=${apiKey}`;
+  const url = 'https://api.twelvedata.com/price?symbol=' + symbols + '&apikey=' + apiKey;
 
   try {
     const res  = await fetch(url);
@@ -469,7 +471,7 @@ async function pollOnce() {
     }
 
     setStatus('connected','● Live');
-    startCountdown(300);
+    startCountdown(900);
 
     if (pairs.length === 1) {
       if (data.price) {
