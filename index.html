@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Phoenixion Price Alert</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0d12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PX Alert">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@600;700&display=swap');
   :root {
@@ -28,7 +34,7 @@
   main{max-width:1150px;margin:0 auto;padding:24px 20px;}
 
   /* ── Settings Bar ── */
-  .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}
+  .settings-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:20px;}
   .settings-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px;}
   .settings-panel .panel-label{font-family:var(--cond);font-size:11px;letter-spacing:1.5px;color:var(--text2);text-transform:uppercase;margin-bottom:8px;}
   .input-row{display:flex;gap:8px;align-items:center;}
@@ -172,7 +178,7 @@
 
   <!-- Settings -->
   <div class="settings-grid">
-    <div class="settings-panel">
+    <div class="settings-panel" style="display:none;">
       <div class="panel-label">TwelveData API Key</div>
       <div class="input-row">
         <input type="password" id="api-key-input" placeholder="Paste your TwelveData API key…">
@@ -271,7 +277,7 @@
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
 let alerts    = JSON.parse(localStorage.getItem('px_alerts') || '[]');
-let apiKey    = localStorage.getItem('px_apikey')  || '';
+let apiKey    = localStorage.getItem('px_apikey')  || 'dc430135c7354e77a3a7efa5d0e17111';
 let tgToken   = localStorage.getItem('px_tgtoken') || '';
 let tgChatId  = localStorage.getItem('px_tgchat')  || '';
 let soundOn   = true;
@@ -285,7 +291,7 @@ window.onload = () => {
   if (tgToken)  document.getElementById('tg-token').value   = '••••••••••••••••';
   if (tgChatId) document.getElementById('tg-chatid').value  = tgChatId;
   renderAlerts();
-  if (apiKey) startPolling();
+  startPolling(); // always start — API key is built in
   startClock();
   requestNotificationPermission();
 };
@@ -454,11 +460,8 @@ async function pollOnce() {
     const text = await res.text();
     let data;
     try { data = JSON.parse(text); } catch(e) {
-      showDebug('Parse error', text.slice(0,300));
-      setStatus('disconnected','● Parse Error'); return;
+        setStatus('disconnected','● Parse Error'); return;
     }
-
-    showDebug('Response for: ' + symbols, data);
 
     if (data.code && data.status === 'error') {
       setStatus('disconnected', '● ' + (data.message || 'API Error ' + data.code));
@@ -487,21 +490,6 @@ async function pollOnce() {
   }
 }
 
-function showDebug(label, data) {
-  let el = document.getElementById('debug-panel');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'debug-panel';
-    el.style.cssText = 'background:#0d1117;border:1px solid #f0b840;border-radius:8px;padding:14px 16px;margin-top:20px;font-family:monospace;font-size:11px;color:#7a8aaa;';
-    el.innerHTML = '<div style="color:#f0b840;font-size:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">🔧 Debug Log <button onclick="document.getElementById(\'debug-panel\').remove()" style="background:none;border:none;color:#4a5570;cursor:pointer;font-size:14px;">✕</button></div>';
-    document.getElementById('fired-log').insertAdjacentElement('afterend', el);
-  }
-  const now = new Date().toISOString().slice(11,19);
-  const entry = document.createElement('div');
-  entry.style.cssText = 'margin-top:6px;padding:6px;background:#111520;border-radius:4px;';
-  entry.innerHTML = `<span style="color:#4da6ff;">[${now}] ${label}</span><pre style="white-space:pre-wrap;word-break:break-all;margin-top:4px;color:#ccd6f6;">${JSON.stringify(data,null,2)}</pre>`;
-  el.appendChild(entry);
-}
 
 function handlePrice(pair, price) {
   livePrices[pair] = price;
@@ -660,6 +648,93 @@ function updatePriceInCards(sym, price) {
   });
 }
 
+// ── Edit Alert ────────────────────────────────────────────────────────────────────
+function editAlert(id) {
+  const a = alerts.find(x => x.id === id);
+  if (!a) return;
+
+  // Populate form with existing values
+  document.getElementById('f-pair').value   = a.pair;
+  document.getElementById('f-type').value   = a.type;
+  document.getElementById('f-note').value   = a.note || '';
+  document.getElementById('f-repeat').value = a.repeat || 'once';
+
+  if (a.type === 'zone') {
+    document.getElementById('f-zone-low').value  = a.zoneLow  || '';
+    document.getElementById('f-zone-high').value = a.zoneHigh || '';
+  } else {
+    document.getElementById('f-level').value = a.level || '';
+  }
+  onTypeChange();
+
+  // Set bias
+  selectedBias = a.bias || null;
+  document.getElementById('bias-bull').className = 'bias-btn bull' + (selectedBias === 'bull' ? ' active' : '');
+  document.getElementById('bias-bear').className = 'bias-btn bear' + (selectedBias === 'bear' ? ' active' : '');
+
+  // Change Add button to Save
+  const btn = document.querySelector('.btn-add[onclick="addAlert()"]');
+  btn.textContent = '✎ Save Edit';
+  btn.onclick = () => saveEdit(id);
+
+  // Scroll to form
+  document.querySelector('.add-alert-panel').scrollIntoView({ behavior: 'smooth' });
+}
+
+function saveEdit(id) {
+  const idx = alerts.findIndex(x => x.id === id);
+  if (idx === -1) return;
+
+  const pair   = document.getElementById('f-pair').value.trim().toUpperCase().replace(/\s/g,'');
+  const type   = document.getElementById('f-type').value;
+  const note   = document.getElementById('f-note').value.trim();
+  const repeat = document.getElementById('f-repeat').value;
+
+  let pairFmt = pair;
+  if (pairFmt && !pairFmt.includes('/')) {
+    if (pairFmt.length === 6) pairFmt = pairFmt.slice(0,3) + '/' + pairFmt.slice(3);
+    else if (pairFmt.length === 7) pairFmt = pairFmt.slice(0,4) + '/' + pairFmt.slice(4);
+  }
+
+  if (!pairFmt) { alert('Enter a currency pair.'); return; }
+
+  let level = null, zoneLow = null, zoneHigh = null;
+  if (type === 'zone') {
+    zoneLow  = parseFloat(document.getElementById('f-zone-low').value);
+    zoneHigh = parseFloat(document.getElementById('f-zone-high').value);
+    if (isNaN(zoneLow) || isNaN(zoneHigh)) { alert('Enter both zone boundaries.'); return; }
+  } else {
+    level = parseFloat(document.getElementById('f-level').value);
+    if (isNaN(level)) { alert('Enter a valid price level.'); return; }
+  }
+
+  // Update alert in place, preserve triggered state and fire count
+  alerts[idx] = {
+    ...alerts[idx],
+    pair: pairFmt, type, level, zoneLow, zoneHigh, note,
+    bias: selectedBias, repeat,
+    triggered: false, triggeredPrice: null, lastAlertTime: null
+  };
+
+  saveAlerts();
+  renderAlerts();
+
+  // Reset form and button
+  ['f-pair','f-level','f-zone-low','f-zone-high','f-note'].forEach(i => document.getElementById(i).value = '');
+  document.getElementById('f-type').value   = 'touch';
+  document.getElementById('f-repeat').value = 'once';
+  onTypeChange();
+  selectedBias = null;
+  document.getElementById('bias-bull').className = 'bias-btn bull';
+  document.getElementById('bias-bear').className = 'bias-btn bear';
+
+  const btn = document.querySelector('.btn-add');
+  btn.textContent = '+ Add Alert';
+  btn.onclick = addAlert;
+
+  if (apiKey) startPolling();
+}
+
 // ── Render ─────────────────────────────────────────────────────────────────────
 function renderAlerts() {
   const container = document.getElementById('alerts-container');
@@ -712,9 +787,19 @@ function renderAlerts() {
       <div class="card-status ${statusClass}">${statusText}</div>
       <div class="card-actions">
         ${resetBtn}
+        <button class="btn-icon" onclick="editAlert(${a.id})" title="Edit" style="color:var(--blue);font-size:13px;">✎</button>
         <button class="btn-icon" onclick="removeAlert(${a.id})" title="Remove">✕</button>
       </div>`;
     container.appendChild(card);
+  });
+}
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('SW registered'))
+      .catch(err => console.log('SW error:', err));
   });
 }
 </script>
