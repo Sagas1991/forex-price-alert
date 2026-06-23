@@ -999,102 +999,66 @@ async function runFVGScan() {
   const results = document.getElementById('fvg-results');
   btn.disabled = true;
   btn.textContent = '⟳ Scanning…';
-  results.innerHTML = '<div class="fvg-scanning">⟳ Starting scan… (20 pairs, ~2.5 mins due to free API limit)</div>';
+
+  // Pause price alert polling during scan to avoid rate limit conflicts
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 
   const fvgFound = [];
   const errors   = [];
 
-  // TwelveData free: 8 req/min = 1 req every 7.5s
-  // We wait 8 seconds between each request to stay safe
-  for (let i = 0; i < FVG_PAIRS.length; i++) {
-    const pair = FVG_PAIRS[i];
+  // Split into batches of 7 — each batch = 1 API call
+  const CHUNK = 7;
+  const chunks = [];
+  for (let i = 0; i < FVG_PAIRS.length; i += CHUNK) chunks.push(FVG_PAIRS.slice(i, i + CHUNK));
 
-    // Update scanning message with progress
-    document.getElementById('fvg-results').innerHTML =
-      `<div class="fvg-scanning">⟳ Scanning ${pair} (${i+1}/${FVG_PAIRS.length})… please wait</div>`;
+  for (let c = 0; c < chunks.length; c++) {
+    const chunk = chunks[c];
+    results.innerHTML = `<div class="fvg-scanning">⟳ Scanning batch ${c+1}/${chunks.length}: ${chunk.join(', ')}…</div>`;
 
-    // Wait 8s before each request (except the first)
-    if (i > 0) await new Promise(r => setTimeout(r, 8000));
+    if (c > 0) await new Promise(r => setTimeout(r, 10000));
+
+    const url = 'https://api.twelvedata.com/time_series?symbol=' + chunk.join(',') + '&interval=1day&outputsize=6&apikey=' + apiKey;
 
     try {
-      // outputsize=6 gives us enough candles; we use previous 3 closed (skip index 0 = current)
-      const sym = pair; // TwelveData accepts EUR/USD format
-      const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=1day&outputsize=6&apikey=${apiKey}`;
       const res  = await fetch(url);
       const data = await res.json();
 
-      if (data.status === 'error' || !data.values || data.values.length < 4) {
-        errors.push(pair + ': ' + (data.message || 'No data'));
+      if (data.status === 'error') {
+        chunk.forEach(p => errors.push(p + ': ' + (data.message || 'API error')));
         continue;
       }
 
-      // values[0] = today (current, possibly incomplete) — skip it
-      // values[1] = 1 day ago (most recent closed)
-      // values[2] = 2 days ago
-      // values[3] = 3 days ago
-      // values[4] = 4 days ago (needed for FVG check on candle[3])
-      const candles = data.values; // newest first
+      for (const pair of chunk) {
+        const pairData = chunk.length === 1 ? data : data[pair];
 
-      // Check FVG in the window: candles[1], [2], [3] (prev 3 closed)
-      // FVG logic: for candle at index n (middle candle):
-      //   Bullish FVG: candle[n+1].high < candle[n-1].low  (prev candle high < next candle low)
-      //   Bearish FVG: candle[n+1].low  > candle[n-1].high
-      // In our array (newest first):
-      //   Middle candle = candles[n]
-      //   Left candle   = candles[n+1] (older)
-      //   Right candle  = candles[n-1] (newer)
-
-      for (let n = 1; n <= 3; n++) {
-        if (!candles[n-1] || !candles[n] || !candles[n+1]) continue;
-
-        const right = candles[n-1]; // newer candle
-        const mid   = candles[n];   // middle candle
-        const left  = candles[n+1]; // older candle
-
-        const leftHigh  = parseFloat(left.high);
-        const leftLow   = parseFloat(left.low);
-        const rightHigh = parseFloat(right.high);
-        const rightLow  = parseFloat(right.low);
-
-        // Bullish FVG: left candle high < right candle low (gap above left, below right)
-        if (leftHigh < rightLow) {
-          const size = (rightLow - leftHigh);
-          fvgFound.push({
-            pair,
-            type: 'bull',
-            top: rightLow,
-            bottom: leftHigh,
-            size: size,
-            candle: n === 1 ? '1 day ago' : n === 2 ? '2 days ago' : '3 days ago',
-            date: mid.datetime
-          });
+        if (!pairData || pairData.status === 'error' || !pairData.values || pairData.values.length < 4) {
+          errors.push(pair + ': ' + (pairData && pairData.message ? pairData.message.slice(0,40) : 'No data'));
+          continue;
         }
 
-        // Bearish FVG: left candle low > right candle high (gap below left, above right)
-        if (leftLow > rightHigh) {
-          const size = (leftLow - rightHigh);
-          fvgFound.push({
-            pair,
-            type: 'bear',
-            top: leftLow,
-            bottom: rightHigh,
-            size: size,
-            candle: n === 1 ? '1 day ago' : n === 2 ? '2 days ago' : '3 days ago',
-            date: mid.datetime
-          });
+        const candles = pairData.values;
+
+        for (let n = 1; n <= 3; n++) {
+          if (!candles[n-1] || !candles[n] || !candles[n+1]) continue;
+          const right    = candles[n-1];
+          const mid      = candles[n];
+          const left     = candles[n+1];
+          const leftHigh = parseFloat(left.high);
+          const leftLow  = parseFloat(left.low);
+          const rightHigh= parseFloat(right.high);
+          const rightLow = parseFloat(right.low);
+          const label    = n === 1 ? '1 day ago' : n === 2 ? '2 days ago' : '3 days ago';
+
+          if (leftHigh < rightLow)  fvgFound.push({ pair, type:'bull', top:rightLow,  bottom:leftHigh,  candle:label, date:mid.datetime });
+          if (leftLow  > rightHigh) fvgFound.push({ pair, type:'bear', top:leftLow,   bottom:rightHigh, candle:label, date:mid.datetime });
         }
       }
     } catch(e) {
-      errors.push(pair + ': network error');
+      chunk.forEach(p => errors.push(p + ': network error'));
     }
-
-    // Small delay every 7 pairs to respect rate limit
-    // Pause every 7 pairs to stay within 8 req/min free limit
-  if (i === 6 || i === 13) await new Promise(r => setTimeout(r, 8000));
   }
 
   renderFVGResults(fvgFound, errors);
-
   btn.disabled = false;
   btn.textContent = '⟳ Scan Now';
 
@@ -1102,7 +1066,11 @@ async function runFVGScan() {
   const ny  = new Date(now.getTime() - 4*3600000);
   document.getElementById('fvg-last-scan').textContent =
     'Last scan: ' + pad(ny.getUTCHours())+':'+pad(ny.getUTCMinutes())+' UTC-4';
+
+  // Restart price alert polling
+  startPolling();
 }
+
 
 function renderFVGResults(fvgFound, errors) {
   const results = document.getElementById('fvg-results');
