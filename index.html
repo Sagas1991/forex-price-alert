@@ -999,15 +999,23 @@ async function runFVGScan() {
   const results = document.getElementById('fvg-results');
   btn.disabled = true;
   btn.textContent = '⟳ Scanning…';
-  results.innerHTML = '<div class="fvg-scanning">⟳ Fetching daily candles for 20 pairs… (may take ~30s)</div>';
+  results.innerHTML = '<div class="fvg-scanning">⟳ Starting scan… (20 pairs, ~2.5 mins due to free API limit)</div>';
 
   const fvgFound = [];
   const errors   = [];
 
-  // Fetch all pairs sequentially to avoid rate limit
-  // TwelveData free: 8 req/min — we fetch one by one with small delay
+  // TwelveData free: 8 req/min = 1 req every 7.5s
+  // We wait 8 seconds between each request to stay safe
   for (let i = 0; i < FVG_PAIRS.length; i++) {
     const pair = FVG_PAIRS[i];
+
+    // Update scanning message with progress
+    document.getElementById('fvg-results').innerHTML =
+      `<div class="fvg-scanning">⟳ Scanning ${pair} (${i+1}/${FVG_PAIRS.length})… please wait</div>`;
+
+    // Wait 8s before each request (except the first)
+    if (i > 0) await new Promise(r => setTimeout(r, 8000));
+
     try {
       // outputsize=6 gives us enough candles; we use previous 3 closed (skip index 0 = current)
       const sym = pair; // TwelveData accepts EUR/USD format
