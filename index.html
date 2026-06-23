@@ -164,6 +164,132 @@
     .alert-card{grid-template-columns:70px 1fr auto auto;}
     .card-live-price{display:none;}
   }
+
+  /* ── FVG Scanner ── */
+  .fvg-scanner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  .fvg-scanner-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .fvg-scanner-title {
+    font-family: var(--cond);
+    font-size: 14px;
+    letter-spacing: 2px;
+    color: var(--gold);
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .fvg-scanner-title::after {
+    content: '';
+    display: block;
+    width: 120px;
+    height: 1px;
+    background: var(--border);
+  }
+  .fvg-scan-btn {
+    background: linear-gradient(135deg, #1a3a5c, #0d2440);
+    border: 1px solid #2a5a8c;
+    border-radius: 6px;
+    color: var(--blue);
+    font-family: var(--cond);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 6px 16px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.2s;
+  }
+  .fvg-scan-btn:hover { background: linear-gradient(135deg, #1f4a72, #102d52); }
+  .fvg-scan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .fvg-last-scan {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-left: 10px;
+  }
+  .fvg-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .fvg-table th {
+    font-family: var(--cond);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: var(--text2);
+    text-transform: uppercase;
+    padding: 6px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .fvg-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(30,40,64,0.5);
+    font-family: var(--mono);
+    font-size: 12px;
+    vertical-align: middle;
+  }
+  .fvg-table tr:last-child td { border-bottom: none; }
+  .fvg-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .fvg-pair-name {
+    font-family: var(--cond);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--gold2);
+    letter-spacing: 1px;
+  }
+  .fvg-bull {
+    display: inline-block;
+    background: rgba(0,229,160,0.15);
+    color: var(--green);
+    font-family: var(--cond);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 1px;
+  }
+  .fvg-bear {
+    display: inline-block;
+    background: rgba(255,77,109,0.15);
+    color: var(--red);
+    font-family: var(--cond);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 1px;
+  }
+  .fvg-level { color: var(--text); }
+  .fvg-candle { color: var(--text2); font-size: 11px; }
+  .fvg-empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 20px;
+    font-size: 12px;
+    font-family: var(--sans);
+  }
+  .fvg-scanning {
+    text-align: center;
+    color: var(--blue);
+    padding: 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+  .fvg-error { text-align:center; color:var(--red); padding:12px; font-size:12px; font-family:var(--mono); }
 </style>
 </head>
 <body>
@@ -175,6 +301,20 @@
 </header>
 
 <main>
+
+  <!-- FVG Scanner -->
+  <div class="fvg-scanner">
+    <div class="fvg-scanner-header">
+      <div class="fvg-scanner-title">📊 Daily FVG Scanner</div>
+      <div style="display:flex;align-items:center;">
+        <span class="fvg-last-scan" id="fvg-last-scan"></span>
+        <button class="fvg-scan-btn" id="fvg-scan-btn" onclick="runFVGScan()">⟳ Scan Now</button>
+      </div>
+    </div>
+    <div id="fvg-results">
+      <div class="fvg-empty">Click "Scan Now" to check last 3 daily candles for FVGs across all pairs.</div>
+    </div>
+  </div>
 
   <!-- Settings -->
   <div class="settings-grid">
@@ -845,6 +985,167 @@ if ('serviceWorker' in navigator) {
       .then(reg => console.log('SW registered'))
       .catch(err => console.log('SW error:', err));
   });
+}
+
+// ── FVG Scanner ────────────────────────────────────────────────────────────────
+const FVG_PAIRS = [
+  'EUR/USD','GBP/USD','AUD/USD','NZD/USD','USD/CAD','USD/CHF',
+  'EUR/JPY','GBP/JPY','AUD/JPY','GBP/AUD','AUD/CHF','XAU/USD','BTC/USD',
+  'GBP/NZD','EUR/AUD','EUR/CHF','EUR/NZD','USD/JPY','XAG/USD'
+];
+
+async function runFVGScan() {
+  const btn = document.getElementById('fvg-scan-btn');
+  const results = document.getElementById('fvg-results');
+  btn.disabled = true;
+  btn.textContent = '⟳ Scanning…';
+  results.innerHTML = '<div class="fvg-scanning">⟳ Fetching daily candles for 20 pairs… (may take ~30s)</div>';
+
+  const fvgFound = [];
+  const errors   = [];
+
+  // Fetch all pairs sequentially to avoid rate limit
+  // TwelveData free: 8 req/min — we fetch one by one with small delay
+  for (let i = 0; i < FVG_PAIRS.length; i++) {
+    const pair = FVG_PAIRS[i];
+    try {
+      // outputsize=6 gives us enough candles; we use previous 3 closed (skip index 0 = current)
+      const sym = pair; // TwelveData accepts EUR/USD format
+      const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=1day&outputsize=6&apikey=${apiKey}`;
+      const res  = await fetch(url);
+      const data = await res.json();
+
+      if (data.status === 'error' || !data.values || data.values.length < 4) {
+        errors.push(pair + ': ' + (data.message || 'No data'));
+        continue;
+      }
+
+      // values[0] = today (current, possibly incomplete) — skip it
+      // values[1] = 1 day ago (most recent closed)
+      // values[2] = 2 days ago
+      // values[3] = 3 days ago
+      // values[4] = 4 days ago (needed for FVG check on candle[3])
+      const candles = data.values; // newest first
+
+      // Check FVG in the window: candles[1], [2], [3] (prev 3 closed)
+      // FVG logic: for candle at index n (middle candle):
+      //   Bullish FVG: candle[n+1].high < candle[n-1].low  (prev candle high < next candle low)
+      //   Bearish FVG: candle[n+1].low  > candle[n-1].high
+      // In our array (newest first):
+      //   Middle candle = candles[n]
+      //   Left candle   = candles[n+1] (older)
+      //   Right candle  = candles[n-1] (newer)
+
+      for (let n = 1; n <= 3; n++) {
+        if (!candles[n-1] || !candles[n] || !candles[n+1]) continue;
+
+        const right = candles[n-1]; // newer candle
+        const mid   = candles[n];   // middle candle
+        const left  = candles[n+1]; // older candle
+
+        const leftHigh  = parseFloat(left.high);
+        const leftLow   = parseFloat(left.low);
+        const rightHigh = parseFloat(right.high);
+        const rightLow  = parseFloat(right.low);
+
+        // Bullish FVG: left candle high < right candle low (gap above left, below right)
+        if (leftHigh < rightLow) {
+          const size = (rightLow - leftHigh);
+          fvgFound.push({
+            pair,
+            type: 'bull',
+            top: rightLow,
+            bottom: leftHigh,
+            size: size,
+            candle: n === 1 ? '1 day ago' : n === 2 ? '2 days ago' : '3 days ago',
+            date: mid.datetime
+          });
+        }
+
+        // Bearish FVG: left candle low > right candle high (gap below left, above right)
+        if (leftLow > rightHigh) {
+          const size = (leftLow - rightHigh);
+          fvgFound.push({
+            pair,
+            type: 'bear',
+            top: leftLow,
+            bottom: rightHigh,
+            size: size,
+            candle: n === 1 ? '1 day ago' : n === 2 ? '2 days ago' : '3 days ago',
+            date: mid.datetime
+          });
+        }
+      }
+    } catch(e) {
+      errors.push(pair + ': network error');
+    }
+
+    // Small delay every 7 pairs to respect rate limit
+    // Pause every 7 pairs to stay within 8 req/min free limit
+  if (i === 6 || i === 13) await new Promise(r => setTimeout(r, 8000));
+  }
+
+  renderFVGResults(fvgFound, errors);
+
+  btn.disabled = false;
+  btn.textContent = '⟳ Scan Now';
+
+  const now = new Date();
+  const ny  = new Date(now.getTime() - 4*3600000);
+  document.getElementById('fvg-last-scan').textContent =
+    'Last scan: ' + pad(ny.getUTCHours())+':'+pad(ny.getUTCMinutes())+' UTC-4';
+}
+
+function renderFVGResults(fvgFound, errors) {
+  const results = document.getElementById('fvg-results');
+
+  if (!fvgFound.length && !errors.length) {
+    results.innerHTML = '<div class="fvg-empty">No FVGs found in the last 3 daily candles across all pairs.</div>';
+    return;
+  }
+
+  let html = '';
+
+  if (fvgFound.length) {
+    html += `<table class="fvg-table">
+      <thead>
+        <tr>
+          <th>Pair</th>
+          <th>Type</th>
+          <th>Candle</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+    // Sort: bearish first, then bullish; within each group by pair name
+    fvgFound.sort((a,b) => {
+      if (a.type !== b.type) return a.type === 'bear' ? -1 : 1;
+      return a.pair.localeCompare(b.pair);
+    });
+
+    fvgFound.forEach(f => {
+      const decimals = f.pair.includes('JPY') || f.pair.includes('BTC') || f.pair.includes('XAU')
+        ? (f.pair.includes('BTC') ? 2 : f.pair.includes('XAU') ? 2 : 3)
+        : 5;
+      html += `<tr>
+        <td><span class="fvg-pair-name">${f.pair}</span></td>
+        <td>${f.type === 'bull'
+          ? '<span class="fvg-bull">▲ Bullish FVG</span>'
+          : '<span class="fvg-bear">▼ Bearish FVG</span>'}</td>
+        <td class="fvg-candle">${f.candle}</td>
+        <td class="fvg-candle">${f.date}</td>
+      </tr>`;
+    });
+
+    html += '</tbody></table>';
+  }
+
+  if (errors.length) {
+    html += `<div class="fvg-error" style="margin-top:8px;">⚠ Could not fetch: ${errors.join(', ')}</div>`;
+  }
+
+  results.innerHTML = html;
 }
 </script>
 </body>
