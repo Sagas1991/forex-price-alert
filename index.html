@@ -463,58 +463,75 @@ async function pollOnce() {
   setStatus('connecting','● Fetching…');
 
   // Convert pairs to Yahoo Finance format
-  // EUR/USD -> EURUSD=X, XAU/USD -> XAUUSD=X, BTC/USD -> BTC-USD, ETH/USD -> ETH-USD
   function toYahoo(pair) {
     const [base, quote] = pair.split('/');
-    if (['BTC','ETH','XAU','XAG'].includes(base)) return base + '-' + quote;
+    if (['BTC','ETH','XRP','LTC'].includes(base)) return base + '-' + quote;
+    if (['XAU','XAG'].includes(base)) return base + quote + '=X';
     return base + quote + '=X';
   }
 
   const yahooSymbols = pairs.map(toYahoo).join(',');
-  // Use allorigins proxy to bypass CORS
-  const yahooUrl = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + yahooSymbols;
-  const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(yahooUrl);
 
-  try {
-    const res  = await fetch(proxyUrl);
-    const json = await res.json();
-    const data = JSON.parse(json.contents);
+  // Try multiple proxies in order
+  const proxies = [
+    'https://corsproxy.io/?' + encodeURIComponent('https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + yahooSymbols),
+    'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + yahooSymbols),
+  ];
 
-    const quotes = data?.quoteResponse?.result;
-    if (!quotes || !quotes.length) {
-      setStatus('disconnected','● No data from Yahoo');
-      return;
-    }
+  let success = false;
 
-    setStatus('connected','● Live');
-    startCountdown(1800);
-
-    quotes.forEach(q => {
-      const price = q.regularMarketPrice;
-      if (!price) return;
-      // Match back to our pair format
-      pairs.forEach(pair => {
-        if (toYahoo(pair) === q.symbol) handlePrice(pair, price);
-      });
-    });
-
-  } catch(e) {
-    // Fallback to TwelveData if Yahoo fails
+  for (const proxyUrl of proxies) {
     try {
-      const url = 'https://api.twelvedata.com/price?symbol=' + pairs.join(',') + '&apikey=' + apiKey;
+      const res  = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch(e) { continue; }
+
+      // codetabs wraps differently, handle both
+      const quoteData = data?.quoteResponse || data?.contents && JSON.parse(data.contents)?.quoteResponse;
+      const quotes = quoteData?.result;
+
+      if (!quotes || !quotes.length) continue;
+
+      setStatus('connected','● Live');
+      startCountdown(1800);
+
+      quotes.forEach(q => {
+        const price = q.regularMarketPrice;
+        if (!price) return;
+        pairs.forEach(pair => {
+          if (toYahoo(pair) === q.symbol) handlePrice(pair, price);
+        });
+      });
+
+      success = true;
+      break;
+
+    } catch(e) { continue; }
+  }
+
+  if (!success) {
+    // Final fallback: TwelveData one pair at a time with delay
+    // Only fetch first 8 pairs to stay under limit
+    const limitedPairs = pairs.slice(0, 7);
+    try {
+      const url = 'https://api.twelvedata.com/price?symbol=' + limitedPairs.join(',') + '&apikey=' + apiKey;
       const res  = await fetch(url);
       const data = await res.json();
-      if (data.status === 'error') { setStatus('disconnected','● ' + data.message.slice(0,50)); return; }
-      setStatus('connected','● Live (TD)');
-      startCountdown(1800);
-      if (pairs.length === 1) {
-        if (data.price) handlePrice(pairs[0], parseFloat(data.price));
+      if (data.status !== 'error') {
+        setStatus('connected','● Live (TD)');
+        startCountdown(1800);
+        if (limitedPairs.length === 1) {
+          if (data.price) handlePrice(limitedPairs[0], parseFloat(data.price));
+        } else {
+          limitedPairs.forEach(pair => {
+            if (data[pair]?.price) handlePrice(pair, parseFloat(data[pair].price));
+          });
+        }
       } else {
-        pairs.forEach(pair => {
-          if (data[pair]?.price) handlePrice(pair, parseFloat(data[pair].price));
-        });
+        setStatus('disconnected','● ' + (data.message || 'API Error').slice(0,55));
       }
-    } catch(e2) {
+    } catch(e) {
       setStatus('disconnected','● Network Error');
     }
   }
